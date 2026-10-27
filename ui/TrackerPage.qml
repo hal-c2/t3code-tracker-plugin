@@ -8,6 +8,8 @@ import HalC2.Bricks
 // The Upstream page: the upstream T3 Code pull requests the ledger's scenarios
 // cite, by whether that work is still being done, and the one picked with who
 // wrote it and the feature files that cite it; or everyone credited across them.
+// From here the checking agent takes the next upstream pull requests, and the
+// implementing agent a feature file's backlog scenarios, each in a thread.
 // Follows the `ledger` topic of each MC that runs the tracker, one MC at a time.
 Item {
     id: page
@@ -26,6 +28,8 @@ Item {
     // "pullRequests" or "credits".
     property string view: "pullRequests"
     property string refusal: ""
+    // "check", or "implement:<path>" → the thread last started for it.
+    readonly property var threads: ledger?.threads ?? ({})
     readonly property color foreground: Theme.palette.color("text", "#e4e4e7")
     readonly property color muted: Theme.palette.color("textMuted", "#a1a1aa")
     readonly property color border: Theme.palette.color("border", "#27272a")
@@ -56,6 +60,35 @@ Item {
             if (error)
                 page.refusal = error;
         }, page.environment);
+    }
+
+    // Starts the checking agent, or the implementing agent on `path`.
+    function start(method, input) {
+        page.refusal = "";
+        page.plugin.call(method, input, (result, error) => {
+            if (error)
+                page.refusal = error;
+        }, page.environment);
+    }
+
+    function openThread(thread) {
+        page.plugin.openThread(thread.threadId, page.environment);
+    }
+
+    // How the thread's last turn went.
+    function threadStatus(thread) {
+        switch (thread.status) {
+        case "running":
+            return qsTr("running");
+        case "completed":
+            return qsTr("done");
+        case "failed":
+            return qsTr("failed");
+        case "interrupted":
+            return qsTr("stopped");
+        default:
+            return thread.status;
+        }
     }
 
     function environmentLabel(environment) {
@@ -209,6 +242,23 @@ Item {
                         enabled: page.ledger !== null && !page.ledger.looking
                         text: qsTr("Look now")
                         onClicked: page.refresh()
+                    }
+
+                    ShellButton {
+                        objectName: "t3codeTrackerCheckThread"
+                        visible: page.threads.check !== undefined
+                        subtle: true
+                        text: visible ? qsTr("Last check: %1").arg(page.threadStatus(page.threads.check)) : ""
+                        Accessible.description: qsTr("Opens the thread of the last check")
+                        onClicked: page.openThread(page.threads.check)
+                    }
+
+                    ShellButton {
+                        objectName: "t3codeTrackerCheck"
+                        enabled: page.ledger?.cursor ? true : false
+                        text: qsTr("Check upstream")
+                        Accessible.description: qsTr("Starts the checking agent on the upstream pull requests after the ledger's cursor")
+                        onClicked: page.start("check", {})
                     }
                 }
 
@@ -445,17 +495,45 @@ Item {
                             id: file
 
                             required property var modelData
+                            readonly property var thread: page.threads["implement:" + modelData.path]
 
+                            objectName: "t3codeTrackerFile:" + modelData.path
                             Layout.fillWidth: true
                             spacing: 1
 
-                            Text {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                text: file.modelData.path
-                                color: page.foreground
-                                elide: Text.ElideMiddle
-                                font.family: Theme.fontMono.length > 0 ? Theme.fontMono : "monospace"
-                                font.pixelSize: Math.round(12 * Theme.fontScale)
+                                spacing: 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: file.modelData.path
+                                    color: page.foreground
+                                    elide: Text.ElideMiddle
+                                    font.family: Theme.fontMono.length > 0 ? Theme.fontMono : "monospace"
+                                    font.pixelSize: Math.round(12 * Theme.fontScale)
+                                }
+
+                                ShellButton {
+                                    objectName: "t3codeTrackerImplementThread"
+                                    visible: file.thread !== undefined
+                                    subtle: true
+                                    text: visible ? qsTr("Implementing: %1").arg(page.threadStatus(file.thread)) : ""
+                                    Accessible.description: qsTr("Opens the thread implementing %1").arg(file.modelData.path)
+                                    onClicked: page.openThread(file.thread)
+                                }
+
+                                // Only what is still to do: scenarios in the backlog.
+                                ShellButton {
+                                    objectName: "t3codeTrackerImplement"
+                                    visible: file.modelData.scenarios.working > 0
+                                    subtle: true
+                                    text: qsTr("Implement")
+                                    Accessible.description: qsTr("Starts the implementing agent on the backlog scenarios of %1").arg(file.modelData.path)
+                                    onClicked: page.start("implement", {
+                                        path: file.modelData.path
+                                    })
+                                }
                             }
 
                             Text {

@@ -23,6 +23,17 @@ the ledger's cursor (`features/UPSTREAM`) and are not read yet.
 A file cites for all of its scenarios, so each scenario in the file counts toward
 every pull request the file cites.
 
+The page also moves the ledger on, each time in a thread of its own, on a new
+worktree of the ledger's project from `main`:
+
+- **Check upstream** starts the checking agent on the upstream commits after the
+  ledger's cursor, with the ledger's `upstream-ledger` skill.
+- **Implement**, beside a feature file that still has backlog scenarios, starts the
+  implementing agent on that file.
+
+The last thread each one started shows beside it, with how its last turn went, and
+opens it.
+
 ## Install
 
 From this folder:
@@ -37,9 +48,9 @@ It copies the package into each MC's `plugins` folder as `t3code-tracker`, the
 plugin's id (`~/.local/share/hal-c2/elixir/plugins/t3code-tracker` and its
 `hal-c2-dev` sibling, under `$XDG_DATA_HOME` when that is set), and has an MC that
 is running look for plugins again; one that is not loads it when it starts. Then
-turn it on in **Settings → Plugins**. It asks only to read the MC's projects: a
+turn it on in **Settings → Plugins**. It asks to read the MC's projects, since a
 checkout of the ledger's repository (`hal-c2/hal-c2` by default) must be a project
-on that MC.
+on that MC, and to start threads, for the checking and implementing agents.
 
 The first look clones upstream's main into the plugin's data folder. The clone
 holds commits only, not files, and every later look fetches what is new.
@@ -52,14 +63,22 @@ holds commits only, not files, and every later look fetches what is new.
   followed: upstream merges everything there, its V2 work included.
 - **Look every (minutes)**: how often it fetches upstream and reads the ledger
   again. **Look now** on the page does it at once.
+- **Checking upstream** and **Implementing**: each has its own agent, model, the
+  model's options (its effort, for one), access, and prompt, so a cheap model can
+  read upstream while a stronger one writes the code. The prompts fill in
+  `{{upstream}}`, `{{ledger}}`, `{{cursor}}` and `{{pending}}` when checking, and
+  `{{file}}`, `{{working}}`, `{{blocked}}`, `{{upstream}}` and `{{pullRequests}}`
+  when implementing. Both ask the agent to commit and push its branch and not to
+  open a pull request.
 
 ## The package
 
 - `plugin.json`: the manifest.
-- `mc/`: the MC part. `t3code_tracker.ex` looks and publishes the `ledger` topic,
-  `ledger.ex` reads feature files and commits (no MC needed), and `mirror.ex`
-  keeps the copy of upstream.
-- `ui/TrackerPage.qml`: the **Upstream** page.
+- `mc/`: the MC part. `t3code_tracker.ex` looks, publishes the `ledger` topic and
+  starts the agents' threads, `ledger.ex` reads feature files and commits (no MC
+  needed), and `mirror.ex` keeps the copy of upstream.
+- `ui/TrackerPage.qml`: the **Upstream** page. `ui/TrackerSettings.qml`: its
+  settings.
 - `test/`: tests for the reader and the page.
 
 ## Tests
@@ -70,9 +89,10 @@ The reader, and the git log format against a real repository:
 elixir -r mc/ledger.ex -r mc/mirror.ex test/ledger_test.exs
 ```
 
-The page, against a fake MC part, from a hal-c2 checkout's `apps/desktop-qt`:
+The page and the settings, against a fake MC part, from a hal-c2 checkout's
+`apps/desktop-qt`:
 
 ```bash
 QT_QPA_PLATFORM=offscreen qmltestrunner -import tests/imports -import qml \
-  -input <this folder>/test/tst_TrackerPage.qml
+  -input <this folder>/test
 ```

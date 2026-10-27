@@ -1,10 +1,13 @@
 {
   "id": "t3code-tracker",
   "name": "T3 Code Tracker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
-  "description": "How far HAL-C2 has carried upstream T3 Code: each upstream pull request its feature scenarios cite, whether that work is still being done or finished, and the people who wrote it upstream.",
-  "author": { "name": "HAL-C2", "url": "https://github.com/hal-c2" },
+  "description": "How far HAL-C2 has carried upstream T3 Code: each upstream pull request its feature scenarios cite, whether that work is still being done or finished, and the people who wrote it upstream. Starts the agents of your choice to check upstream and to implement what is left.",
+  "author": {
+    "name": "HAL-C2",
+    "url": "https://github.com/hal-c2"
+  },
   "homepage": "https://github.com/hal-c2/t3code-tracker-plugin",
   "license": "MIT",
   "icon": "assets/icon.svg",
@@ -12,6 +15,10 @@
     {
       "id": "projects:read",
       "reason": "To find the checkout of the ledger's repository on this MC and read its feature files."
+    },
+    {
+      "id": "threads:create",
+      "reason": "Checking upstream and implementing a feature file each run as a thread, on the agent you pick for it."
     }
   ],
   "settings": [
@@ -34,9 +41,54 @@
       "label": "Look every (minutes)",
       "type": "number",
       "default": 30
+    },
+    {
+      "key": "checking",
+      "label": "Agent that checks upstream",
+      "type": "object",
+      "default": {
+        "provider": "claudeAgent",
+        "model": "",
+        "modelOptions": {},
+        "runtimeMode": "auto-accept-edits"
+      },
+      "description": "{\"provider\", \"model\", \"modelOptions\", \"runtimeMode\"}: the agent instance, its model (empty for its default), the model's options such as {\"effort\": \"high\"}, and its access."
+    },
+    {
+      "key": "checkPrompt",
+      "label": "Checking prompt",
+      "type": "longText",
+      "default": "Ledger upstream {{upstream}} with the upstream-ledger skill. The ledger has read through {{cursor}}, and {{pending}} upstream commits on main come after it. Take the next batch with `mise run upstream --limit 10`, decide each pull request as the skill says, write the scenarios, add the newcomers to CREDITS.md, and move features/UPSTREAM. Commit the batch and push the branch. Do not open a pull request unless I ask.",
+      "description": "{{upstream}}, {{ledger}}, {{cursor}} and {{pending}} are filled in."
+    },
+    {
+      "key": "implementing",
+      "label": "Agent that implements",
+      "type": "object",
+      "default": {
+        "provider": "claudeAgent",
+        "model": "",
+        "modelOptions": {},
+        "runtimeMode": "auto-accept-edits"
+      },
+      "description": "As the checking agent, for the threads that implement a feature file's backlog scenarios."
+    },
+    {
+      "key": "implementPrompt",
+      "label": "Implementing prompt",
+      "type": "longText",
+      "default": "Make the backlog scenarios in {{file}} pass. {{working}} of its scenarios are still @backlog or @backlog-<surface>, and it carries what upstream {{upstream}} did in {{pullRequests}}. Read features/README.md and AGENTS.md first. Implement each behaviour on the surfaces its scenario names, take the backlog tag off each scenario once it passes there, and run the file's scenarios to show it. Where you carry over upstream code rather than write it anew, add its upstream authors as Co-authored-by on that commit. Commit and push the branch. Do not open a pull request unless I ask.",
+      "description": "{{file}}, {{working}}, {{blocked}}, {{upstream}} and {{pullRequests}} are filled in."
     }
   ],
   "contributes": {
-    "pages": [{ "id": "t3code-tracker", "title": "Upstream", "qml": "ui/TrackerPage.qml" }]
+    "pages": [
+      {
+        "id": "t3code-tracker",
+        "title": "Upstream",
+        "qml": "ui/TrackerPage.qml"
+      }
+    ],
+    "settingsPage": "ui/TrackerSettings.qml"
   }
 }
