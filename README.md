@@ -28,9 +28,9 @@ every pull request the file cites.
 From this folder:
 
 ```bash
-mise run install            # the dev MC (hal-c2-dev) and the installed MC (hal-c2)
-mise run install --dev      # only the dev MC
-mise run install --release  # only the installed MC
+mise run plugin:install            # the dev MC (hal-c2-dev) and the installed MC (hal-c2)
+mise run plugin:install --dev      # only the dev MC
+mise run plugin:install --release  # only the installed MC
 ```
 
 It copies the package into each MC's `plugins` folder as `t3code-tracker`, the
