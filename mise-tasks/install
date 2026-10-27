@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#MISE description="Install or update this plugin in the dev MC and the installed MC, and have each running one load it"
+#MISE dir="{{config_root}}"
+#USAGE flag "--dev" help="Only the dev MC (hal-c2-dev, the one a checkout's mise run mc starts)"
+#USAGE flag "--release" help="Only the installed MC (hal-c2, the service)"
+# Copies the package into <data>/plugins/t3code-tracker of each MC, where data is
+# ${XDG_DATA_HOME:-~/.local/share}/<profile>/elixir, the same place Look for plugins
+# reads. A running MC is asked to look again, as hal-c2's mise run plugins:install
+# does; one that is not running loads it when it starts.
+set -euo pipefail
+
+id=$(jq -r .id plugin.json)
+profiles=()
+[[ ${usage_dev:-false} == true ]] && profiles+=(hal-c2-dev)
+[[ ${usage_release:-false} == true ]] && profiles+=(hal-c2)
+((${#profiles[@]})) || profiles=(hal-c2-dev hal-c2)
+
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+state_home=${XDG_STATE_HOME:-$HOME/.local/state}
+
+for profile in "${profiles[@]}"; do
+  data="$data_home/$profile/elixir"
+  plugins="$data/plugins"
+  # Staged beside the plugins folder, where a rescan does not see it, then swapped in
+  # whole, so files an older version had do not linger.
+  staged="$data/.plugin-$id.partial" old="$data/.plugin-$id.old"
+  rm -rf "$staged" "$old"
+  mkdir -p "$plugins" "$staged"
+  git ls-files -z plugin.json LICENSE README.md assets mc ui | xargs -0 cp --parents -t "$staged"
+  [[ ! -e $plugins/$id ]] || mv "$plugins/$id" "$old"
+  mv "$staged" "$plugins/$id"
+  rm -rf "$old"
+
+  token=$(cat "$data/access-token" 2>/dev/null || true)
+  origin=$(jq -r '.origin // empty' "$state_home/$profile/elixir/server-runtime.json" 2>/dev/null || true)
+  said=""
+  if [[ -n $token && -n $origin ]]; then
+    said=$(curl -sf --max-time 90 -X POST -H "authorization: Bearer $token" \
+      -H 'content-type: application/json' -d '{}' "$origin/api/plugins/rescan" |
+      jq -r --arg id "$id" '.plugins[] | select(.id == $id)
+        | "\(.version): \(.reloadError // .error // .status)"' 2>/dev/null || true)
+  fi
+  if [[ -n $said ]]; then
+    echo "$profile: $id $said"
+  else
+    echo "$profile: installed in $plugins/$id; no MC answered, so it loads when the MC starts."
+  fi
+done

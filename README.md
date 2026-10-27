@@ -25,11 +25,21 @@ every pull request the file cites.
 
 ## Install
 
-Copy this folder into the MC's `plugins` folder as `t3code-tracker`, the plugin's
-id (`~/.local/share/hal-c2/elixir/plugins/t3code-tracker` on Linux). Click **Look for
-plugins** in **Settings → Plugins**, then turn it on. It asks only to read the MC's
-projects: a checkout of the ledger's repository (`hal-c2/hal-c2` by default) must
-be a project on that MC.
+From this folder:
+
+```bash
+mise run install            # the dev MC (hal-c2-dev) and the installed MC (hal-c2)
+mise run install --dev      # only the dev MC
+mise run install --release  # only the installed MC
+```
+
+It copies the package into each MC's `plugins` folder as `t3code-tracker`, the
+plugin's id (`~/.local/share/hal-c2/elixir/plugins/t3code-tracker` and its
+`hal-c2-dev` sibling, under `$XDG_DATA_HOME` when that is set), and has an MC that
+is running look for plugins again; one that is not loads it when it starts. Then
+turn it on in **Settings → Plugins**. It asks only to read the MC's projects: a
+checkout of the ledger's repository (`hal-c2/hal-c2` by default) must be a project
+on that MC.
 
 The first look clones upstream's main into the plugin's data folder. The clone
 holds commits only, not files, and every later look fetches what is new.
