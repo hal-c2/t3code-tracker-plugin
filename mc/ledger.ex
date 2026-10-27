@@ -15,7 +15,9 @@ defmodule HalC2Plugins.T3codeTracker.Ledger do
   # Co-authors that are agents and bots rather than people. GitHub's own bots end
   # in `[bot]`; these are the agents that sign commits with an address of their own,
   # and an address on a domain reserved for tests (RFC 2606) is nobody's.
-  @agents ~w(noreply@anthropic.com cursoragent@cursor.com)
+  @agents ~w(noreply@anthropic.com noreply@openai.com codex@openai.com cursoragent@cursor.com)
+  # Agents GitHub gives an account, known by their login.
+  @agent_logins ~w(codex copilot)
   @reserved ~w(.test .example .invalid .localhost)
 
   @doc "The status counts of nothing, the start of every sum."
@@ -153,7 +155,7 @@ defmodule HalC2Plugins.T3codeTracker.Ledger do
       "login" => login,
       "bot" =>
         String.contains?(name <> email, "[bot]") or email in @agents or
-          String.ends_with?(email, @reserved)
+          String.downcase(login || "") in @agent_logins or String.ends_with?(email, @reserved)
     }
   end
 

@@ -79,6 +79,9 @@ defmodule HalC2Plugins.T3codeTracker.LedgerTest do
                    "Julius Marminge <Julius0216@outlook.com>",
                    "maria-rcks <maria@kuuro.net>",
                    "Claude Opus 5 (1M context) <noreply@anthropic.com>",
+                   "codex <codex@users.noreply.github.com>",
+                   "Copilot <175728472+Copilot@users.noreply.github.com>",
+                   "GPT-6.1 Sol <noreply@openai.com>",
                    "PR Batch Tester <agent@local.test>",
                    "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
                  ],
@@ -127,6 +130,9 @@ defmodule HalC2Plugins.T3codeTracker.LedgerTest do
              {"maria-rcks", nil, false},
              {"Bilal Bakr", "Bil0000", false},
              {"Claude Opus 5 (1M context)", nil, true},
+             {"codex", "codex", true},
+             {"Copilot", "Copilot", true},
+             {"GPT-6.1 Sol", nil, true},
              {"PR Batch Tester", nil, true},
              {"github-actions[bot]", "github-actions[bot]", true}
            ]
