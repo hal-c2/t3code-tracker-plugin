@@ -1,0 +1,42 @@
+{
+  "id": "t3code-tracker",
+  "name": "T3 Code Tracker",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "How far HAL-C2 has carried upstream T3 Code: each upstream pull request its feature scenarios cite, whether that work is still being done or finished, and the people who wrote it upstream.",
+  "author": { "name": "HAL-C2", "url": "https://github.com/hal-c2" },
+  "homepage": "https://github.com/hal-c2/t3code-tracker-plugin",
+  "license": "MIT",
+  "icon": "assets/icon.svg",
+  "permissions": [
+    {
+      "id": "projects:read",
+      "reason": "To find the checkout of the ledger's repository on this MC and read its feature files."
+    }
+  ],
+  "settings": [
+    {
+      "key": "ledger",
+      "label": "Ledger repository",
+      "type": "text",
+      "default": "hal-c2/hal-c2",
+      "description": "owner/name of the repository whose features/ cite upstream. A checkout of it must be a project on this MC."
+    },
+    {
+      "key": "upstream",
+      "label": "Upstream repository",
+      "type": "text",
+      "default": "pingdotgg/t3code",
+      "description": "owner/name of the upstream on GitHub. Its main branch is what is tracked."
+    },
+    {
+      "key": "pollMinutes",
+      "label": "Look every (minutes)",
+      "type": "number",
+      "default": 30
+    }
+  ],
+  "contributes": {
+    "pages": [{ "id": "t3code-tracker", "title": "Upstream", "qml": "ui/TrackerPage.qml" }]
+  }
+}
