@@ -1,11 +1,11 @@
 # Run from the plugin's folder:
-#   elixir -r mc/ledger.ex -r mc/mirror.ex test/ledger_test.exs
+#   elixir -r mc/ledger.ex -r mc/mirror.ex -r mc/checkout.ex test/ledger_test.exs
 ExUnit.start()
 
 defmodule HalC2Plugins.T3codeTracker.LedgerTest do
   use ExUnit.Case, async: true
 
-  alias HalC2Plugins.T3codeTracker.{Ledger, Mirror}
+  alias HalC2Plugins.T3codeTracker.{Checkout, Ledger, Mirror}
 
   @upstream "pingdotgg/t3code"
 
@@ -259,5 +259,54 @@ defmodule HalC2Plugins.T3codeTracker.LedgerTest do
     assert commit["author"]["name"] == "Ada"
     assert Enum.map(commit["coAuthors"], & &1["name"]) == ["Grace", "Linus"]
     assert Mirror.pending(Path.join(root, "copy.git"), commit["sha"]) == 0
+  end
+
+  @tag :git
+  test "the ledger is what main has on origin, not what the checkout has on disk" do
+    root = Path.join(System.tmp_dir!(), "t3code-tracker-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(root) end)
+    origin = Path.join(root, "origin")
+    checkout = Path.join(root, "checkout")
+    File.mkdir_p!(origin)
+
+    env = [
+      {"GIT_CONFIG_GLOBAL", "/dev/null"},
+      {"GIT_CONFIG_NOSYSTEM", "1"},
+      {"GIT_AUTHOR_NAME", "Ada"},
+      {"GIT_AUTHOR_EMAIL", "ada@example.com"},
+      {"GIT_COMMITTER_NAME", "Ada"},
+      {"GIT_COMMITTER_EMAIL", "ada@example.com"}
+    ]
+
+    git = fn cwd, args ->
+      {_, 0} = System.cmd("git", args, cd: cwd, env: env, stderr_to_stdout: true)
+    end
+
+    commit = fn path, text ->
+      File.mkdir_p!(Path.dirname(Path.join(origin, path)))
+      File.write!(Path.join(origin, path), text)
+      git.(origin, ["add", path])
+      git.(origin, ["commit", "--quiet", "-m", "add #{path}"])
+    end
+
+    git.(origin, ["init", "--quiet", "--initial-branch", "main"])
+    commit.("features/a.feature", "a on main\n")
+    git.(root, ["clone", "--quiet", origin, checkout])
+
+    # Main moves on, while the checkout sits on a branch of its own with an edit.
+    commit.("features/b.feature", "b on main\n")
+    git.(checkout, ["switch", "--quiet", "-c", "other"])
+    File.write!(Path.join(checkout, "features/a.feature"), "a edited\n")
+
+    assert :ok = Checkout.fetch(checkout)
+    assert {:ok, sha, files} = Checkout.files(checkout, "features")
+
+    assert files == %{
+             "features/a.feature" => "a on main\n",
+             "features/b.feature" => "b on main\n"
+           }
+
+    assert {head, 0} = System.cmd("git", ["rev-parse", "main"], cd: origin)
+    assert sha == String.trim(head)
   end
 end

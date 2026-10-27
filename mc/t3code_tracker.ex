@@ -1,8 +1,9 @@
 defmodule HalC2Plugins.T3codeTracker do
   @moduledoc """
-  Tracks how far HAL-C2 has carried upstream T3 Code. Every few minutes it reads
-  the feature files of the ledger's project on this MC for the upstream pull
-  requests and commits their `# Sources:` cite, and fetches upstream's main
+  Tracks how far HAL-C2 has carried upstream T3 Code. Every few minutes it fetches
+  the ledger's main branch into its project on this MC, reads the feature files
+  there for the upstream pull requests and commits their `# Sources:` cite, and
+  fetches upstream's main
   branch for who wrote each one. It publishes all of it on the `ledger` topic:
   each cited pull request with the status of its scenarios and its authors, the
   people credited across them, and how many upstream commits the ledger has not
@@ -21,7 +22,7 @@ defmodule HalC2Plugins.T3codeTracker do
   use GenServer
 
   alias HalC2.Plugins.Host
-  alias HalC2Plugins.T3codeTracker.{Ledger, Mirror}
+  alias HalC2Plugins.T3codeTracker.{Checkout, Ledger, Mirror}
 
   @id "t3code-tracker"
   @roles ~w(checking implementing)
@@ -339,14 +340,16 @@ defmodule HalC2Plugins.T3codeTracker do
 
   # --- looking -----------------------------------------------------------------------------
 
-  # The ledger and upstream as they are now. Upstream that cannot be fetched is read
-  # from the copy there is, with why in `problem`; a ledger that cannot be found
-  # keeps what was published before.
+  # The ledger and upstream as their main branches are now. Either that cannot be
+  # fetched is read as it was last fetched, with why in `problem`; a ledger that
+  # cannot be found or read keeps what was published before.
   defp look(settings) do
     upstream = settings["upstream"]
     dir = Path.join([Host.data_dir(@id), "upstream", upstream <> ".git"])
 
-    with {:ok, project} <- ledger_project(settings["ledger"]) do
+    with {:ok, project} <- ledger_project(settings["ledger"]),
+         fetched = Checkout.fetch(project["root"]),
+         {:ok, sha, files} <- Checkout.files(project["root"], "features") do
       synced = Mirror.sync(dir, upstream)
 
       {commits, logged} =
@@ -355,25 +358,34 @@ defmodule HalC2Plugins.T3codeTracker do
           error -> {[], error}
         end
 
-      entries = project["root"] |> features(upstream) |> Ledger.entries(commits, upstream)
-      cursor = cursor(project["root"], commits, dir)
+      entries = files |> features(upstream) |> Ledger.entries(commits, upstream)
+      cursor = cursor(files, commits, dir)
 
       %{
         "upstream" => upstream,
         "ledger" => %{
           "repository" => settings["ledger"],
           "project" => project["title"],
-          "root" => project["root"]
+          "root" => project["root"],
+          "branch" => Checkout.branch(),
+          "commit" => sha
         },
         "cursor" => cursor,
         "pullRequests" => entries,
         "credits" => Ledger.credits(entries),
         "checkedAt" => System.system_time(:millisecond),
         "problem" =>
-          Enum.find_value([synced, logged], fn
-            {:error, message} -> "Upstream could not be read: #{message}"
-            :ok -> nil
-          end)
+          Enum.find_value(
+            [
+              {"The ledger could not be fetched", fetched},
+              {"Upstream could not be fetched", synced},
+              {"Upstream could not be read", logged}
+            ],
+            fn
+              {what, {:error, message}} -> "#{what}: #{message}"
+              {_, :ok} -> nil
+            end
+          )
       }
     else
       {:error, message} -> %{"problem" => message}
@@ -396,14 +408,14 @@ defmodule HalC2Plugins.T3codeTracker do
     end
   end
 
-  defp features(root, upstream) do
-    for file <- root |> Path.join("features/**/*.feature") |> Path.wildcard() |> Enum.sort(),
-        {:ok, text} <- [File.read(file)],
-        do: {Path.relative_to(file, root), Ledger.feature(text, upstream)}
+  defp features(files, upstream) do
+    for {path, text} <- Enum.sort(files),
+        String.ends_with?(path, ".feature"),
+        do: {path, Ledger.feature(text, upstream)}
   end
 
-  defp cursor(root, commits, dir) do
-    with {:ok, text} <- File.read(Path.join(root, "features/UPSTREAM")),
+  defp cursor(files, commits, dir) do
+    with {:ok, text} <- Map.fetch(files, "features/UPSTREAM"),
          sha when is_binary(sha) <- Ledger.cursor(text) do
       commit = Enum.find(commits, &String.starts_with?(&1["sha"], sha))
 

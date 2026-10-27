@@ -52,7 +52,9 @@ turn it on in **Settings → Plugins**. It asks to read the MC's projects, since
 checkout of the ledger's repository (`hal-c2/hal-c2` by default) must be a project
 on that MC, and to start threads, for the checking and implementing agents.
 
-The first look clones upstream's main into the plugin's data folder. The clone
+Each look fetches the ledger's main branch into that checkout and reads
+`features/` as main has it, whatever branch or edits the checkout itself has.
+The first look also clones upstream's main into the plugin's data folder. The clone
 holds commits only, not files, and every later look fetches what is new.
 
 ## Settings
@@ -76,7 +78,8 @@ holds commits only, not files, and every later look fetches what is new.
 - `plugin.json`: the manifest.
 - `mc/`: the MC part. `t3code_tracker.ex` looks, publishes the `ledger` topic and
   starts the agents' threads, `ledger.ex` reads feature files and commits (no MC
-  needed), and `mirror.ex` keeps the copy of upstream.
+  needed), `checkout.ex` reads the ledger's main through its checkout, and
+  `mirror.ex` keeps the copy of upstream.
 - `ui/TrackerPage.qml`: the **Upstream** page. `ui/TrackerSettings.qml`: its
   settings.
 - `test/`: tests for the reader and the page.
@@ -86,7 +89,7 @@ holds commits only, not files, and every later look fetches what is new.
 The reader, and the git log format against a real repository:
 
 ```bash
-elixir -r mc/ledger.ex -r mc/mirror.ex test/ledger_test.exs
+elixir -r mc/ledger.ex -r mc/mirror.ex -r mc/checkout.ex test/ledger_test.exs
 ```
 
 The page and the settings, against a fake MC part, from a hal-c2 checkout's
