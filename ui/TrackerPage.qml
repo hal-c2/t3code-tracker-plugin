@@ -5,12 +5,14 @@ import QtQuick.Layouts
 import HalC2.Shell
 import HalC2.Bricks
 
-// The Upstream page: the upstream T3 Code pull requests the ledger's scenarios
-// cite, by whether that work is still being done, and the one picked with who
-// wrote it and the feature files that cite it; or everyone credited across them.
-// From here the checking agent takes the next upstream pull requests, and the
-// implementing agent a feature file's backlog scenarios, each in a thread.
-// Follows the `ledger` topic of each MC that runs the tracker, one MC at a time.
+// The Ledger page: each feature file with backlog work, most high priority first,
+// with the branches and pull requests at work on it; those branches; the upstream
+// T3 Code pull requests the ledger's scenarios cite, by whether that work is still
+// being done, and the one picked with who wrote it and the feature files that cite
+// it; or everyone credited across them. From here the checking agent takes the next
+// upstream pull requests, and the implementing agent a feature file's backlog
+// scenarios, each in a thread. Follows the `ledger` topic of each MC that runs the
+// tracker, one MC at a time.
 Item {
     id: page
 
@@ -25,8 +27,27 @@ Item {
     readonly property var pullRequests: (ledger?.pullRequests ?? []).slice().sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
     property string selected: ""
     readonly property var pullRequest: pullRequests.find(each => each.key === selected) ?? null
-    // "pullRequests" or "credits".
-    property string view: "pullRequests"
+    // The feature files with backlog work, and path → which of them.
+    readonly property var backlog: ledger?.backlog ?? []
+    readonly property var backlogByPath: byKey(backlog, file => file.path)
+    // The branches at work on the ledger, by name, and path → those at work on it,
+    // each with what it does to that file.
+    readonly property var work: ledger?.work ?? []
+    readonly property var workByBranch: byKey(work, item => item.branch)
+    readonly property var workByPath: {
+        const byPath = {};
+        for (const item of page.work) {
+            for (const file of item.files) {
+                byPath[file.path] = (byPath[file.path] ?? []).concat([Object.assign({}, file, {
+                        branch: item.branch,
+                        pullRequest: item.pullRequest
+                    })]);
+            }
+        }
+        return byPath;
+    }
+    // "backlog", "work", "pullRequests" or "credits".
+    property string view: "backlog"
     property string refusal: ""
     // "check", or "implement:<path>" → the thread last started for it.
     readonly property var threads: ledger?.threads ?? ({})
@@ -35,6 +56,14 @@ Item {
     readonly property color border: Theme.palette.color("border", "#27272a")
     readonly property color warningColor: Theme.palette.color("warning", "#f59e0b")
     readonly property color successColor: Theme.palette.color("success", "#22c55e")
+
+    // `list` as an object by `key` of each (QML's JavaScript has no Object.fromEntries).
+    function byKey(list, key) {
+        const keyed = {};
+        for (const each of list)
+            keyed[key(each)] = each;
+        return keyed;
+    }
 
     function follow() {
         const watches = {};
@@ -143,8 +172,84 @@ Item {
         return person.login ? "<a href=\"https://github.com/%1\">%2</a>".arg(encodeURIComponent(person.login)).arg(name) : name;
     }
 
+    function escaped(text) {
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // A branch at work as styled text: its pull request, or the branch on GitHub.
+    function workLink(item) {
+        const pullRequest = item.pullRequest;
+        if (pullRequest)
+            return "<a href=\"%1\">#%2</a> %3".arg(pullRequest.url).arg(pullRequest.number).arg(page.escaped(pullRequest.title ?? "")) + (pullRequest.draft ? " " + qsTr("(draft)") : "");
+        const repository = page.ledger?.ledger?.repository;
+        if (!repository)
+            return page.escaped(item.branch);
+        return "<a href=\"https://github.com/%1/tree/%2\">%3</a>".arg(repository).arg(item.branch.split("/").map(encodeURIComponent).join("/")).arg(page.escaped(item.branch));
+    }
+
+    // What a branch does to one file: the backlog scenarios it changes and those it
+    // makes pass.
+    function workOnFile(item) {
+        if (item.scenarios === 0)
+            return qsTr("%1, editing the file").arg(page.workLink(item));
+        return qsTr("%1, %2 of its backlog scenarios changed, %3 passing").arg(page.workLink(item)).arg(item.scenarios).arg(item.finishes);
+    }
+
+    // "12 to do · 1 blocked · 30 finished · missing on desktop 8, mobile 4 · 2 high priority"
+    function backlogText(file) {
+        const scenarios = file.scenarios;
+        const parts = [qsTr("%1 to do").arg(scenarios.working.toLocaleString())];
+        if (scenarios.blocked > 0)
+            parts.push(qsTr("%1 blocked").arg(scenarios.blocked));
+        parts.push(qsTr("%1 finished").arg(scenarios.finished.toLocaleString()));
+        const missing = ["mc", "desktop", "mobile", "tui"].filter(surface => file.surfaces[surface] > 0).map(surface => "%1 %2".arg(surface).arg(file.surfaces[surface]));
+        if (missing.length > 0)
+            parts.push(qsTr("missing on %1").arg(missing.join(", ")));
+        if (file.priority.high > 0)
+            parts.push(qsTr("%1 high priority").arg(file.priority.high));
+        return parts.join(" · ");
+    }
+
     function date(value) {
         return value ? Qt.formatDate(new Date(value), Qt.locale().dateFormat(Locale.ShortFormat)) : "";
+    }
+
+    // A feature file's thread and Implement buttons: implementing is offered while
+    // the file has backlog work that is not blocked.
+    component FileActions: RowLayout {
+        id: actions
+
+        required property string path
+        readonly property var thread: page.threads["implement:" + path]
+
+        spacing: 8
+
+        ShellButton {
+            objectName: "t3codeTrackerImplementThread"
+            visible: actions.thread !== undefined
+            subtle: true
+            text: visible ? qsTr("Implementing: %1").arg(page.threadStatus(actions.thread)) : ""
+            Accessible.description: qsTr("Opens the thread implementing %1").arg(actions.path)
+            onClicked: page.openThread(actions.thread)
+        }
+
+        ShellButton {
+            objectName: "t3codeTrackerImplement"
+            visible: (page.backlogByPath[actions.path]?.scenarios.working ?? 0) > 0
+            subtle: true
+            text: qsTr("Implement")
+            Accessible.description: qsTr("Starts the implementing agent on the backlog scenarios of %1").arg(actions.path)
+            onClicked: page.start("implement", {
+                path: actions.path
+            })
+        }
+    }
+
+    component SectionTitle: Text {
+        color: page.muted
+        font.pixelSize: Math.round(11 * Theme.fontScale)
+        font.weight: Font.Medium
+        font.capitalization: Font.AllUppercase
     }
 
     objectName: "t3codeTrackerPage"
@@ -223,9 +328,23 @@ Item {
                     }
 
                     ShellButton {
+                        objectName: "t3codeTrackerBacklogView"
+                        subtle: page.view !== "backlog"
+                        text: qsTr("Backlog")
+                        onClicked: page.view = "backlog"
+                    }
+
+                    ShellButton {
+                        objectName: "t3codeTrackerWorkView"
+                        subtle: page.view !== "work"
+                        text: page.work.length > 0 ? qsTr("In progress (%1)").arg(page.work.length) : qsTr("In progress")
+                        onClicked: page.view = "work"
+                    }
+
+                    ShellButton {
                         objectName: "t3codeTrackerPullRequests"
                         subtle: page.view !== "pullRequests"
-                        text: qsTr("Pull requests")
+                        text: qsTr("Upstream")
                         onClicked: page.view = "pullRequests"
                     }
 
@@ -271,6 +390,171 @@ Item {
                     wrapMode: Text.Wrap
                     font.pixelSize: Math.round(12 * Theme.fontScale)
                 }
+            }
+        }
+
+        // Every feature file with work left, most high priority first.
+        ListView {
+            id: backlogList
+
+            objectName: "t3codeTrackerBacklog"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: page.view === "backlog"
+            clip: true
+            model: page.backlog
+            boundsBehavior: Flickable.StopAtBounds
+
+            ScrollBar.vertical: ScrollBar {}
+
+            header: Text {
+                width: backlogList.width
+                padding: 16
+                bottomPadding: 6
+                text: {
+                    const working = page.backlog.reduce((sum, file) => sum + file.scenarios.working, 0);
+                    return qsTr("%1 backlog scenarios in %2 feature files, as mise run features:pick counts them.").arg(working.toLocaleString()).arg(page.backlog.length);
+                }
+                color: page.muted
+                wrapMode: Text.Wrap
+                font.pixelSize: Math.round(12 * Theme.fontScale)
+            }
+
+            delegate: ColumnLayout {
+                id: backlogFile
+
+                required property var modelData
+                readonly property var atWork: page.workByPath[modelData.path] ?? []
+
+                objectName: "t3codeTrackerBacklog:" + modelData.path
+                x: 16
+                width: backlogList.width - 32
+                spacing: 1
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 8
+                    spacing: 8
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: backlogFile.modelData.path
+                        color: page.foreground
+                        elide: Text.ElideMiddle
+                        font.family: Theme.fontMono.length > 0 ? Theme.fontMono : "monospace"
+                        font.pixelSize: Math.round(12 * Theme.fontScale)
+                    }
+
+                    FileActions {
+                        path: backlogFile.modelData.path
+                    }
+                }
+
+                Text {
+                    objectName: "t3codeTrackerBacklogCounts"
+                    Layout.fillWidth: true
+                    text: page.backlogText(backlogFile.modelData)
+                    color: backlogFile.modelData.scenarios.working === 0 ? page.warningColor : page.muted
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Math.round(11 * Theme.fontScale)
+                }
+
+                Text {
+                    objectName: "t3codeTrackerAtWork"
+                    Layout.fillWidth: true
+                    visible: backlogFile.atWork.length > 0
+                    textFormat: Text.StyledText
+                    linkColor: Theme.link
+                    text: visible ? qsTr("At work: %1").arg(backlogFile.atWork.map(item => page.workOnFile(item)).join("; ")) : ""
+                    color: page.foreground
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Math.round(11 * Theme.fontScale)
+                    onLinkActivated: link => Qt.openUrlExternally(link)
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 48
+                visible: page.backlog.length === 0 && page.ledger !== null && !page.ledger.looking
+                text: qsTr("No feature file of the ledger has backlog work.")
+                color: page.muted
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
+                font.pixelSize: Math.round(13 * Theme.fontScale)
+            }
+        }
+
+        // The branches at work on the ledger, newest first, and what each changes.
+        ListView {
+            id: workList
+
+            objectName: "t3codeTrackerWork"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: page.view === "work"
+            clip: true
+            model: page.work
+            boundsBehavior: Flickable.StopAtBounds
+
+            ScrollBar.vertical: ScrollBar {}
+
+            header: Text {
+                width: workList.width
+                padding: 16
+                bottomPadding: 6
+                text: qsTr("Branches of the ledger's repository with an open pull request or a commit this week that change its feature files, newest first.")
+                color: page.muted
+                wrapMode: Text.Wrap
+                font.pixelSize: Math.round(12 * Theme.fontScale)
+            }
+
+            delegate: ColumnLayout {
+                id: branch
+
+                required property var modelData
+
+                objectName: "t3codeTrackerBranch:" + modelData.branch
+                x: 16
+                width: workList.width - 32
+                spacing: 1
+
+                Text {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 8
+                    textFormat: Text.StyledText
+                    linkColor: Theme.link
+                    text: page.workLink(branch.modelData) + (branch.modelData.pullRequest ? "  <font color=\"%1\">%2</font>".arg(page.muted).arg(page.escaped(branch.modelData.branch)) : "")
+                    color: page.foreground
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Math.round(13 * Theme.fontScale)
+                    onLinkActivated: link => Qt.openUrlExternally(link)
+                }
+
+                Repeater {
+                    model: branch.modelData.files
+
+                    delegate: Text {
+                        required property var modelData
+
+                        Layout.fillWidth: true
+                        text: modelData.scenarios === 0 ? qsTr("%1: edited").arg(modelData.path) : qsTr("%1: %2 backlog scenarios changed, %3 passing").arg(modelData.path).arg(modelData.scenarios).arg(modelData.finishes)
+                        color: page.muted
+                        elide: Text.ElideMiddle
+                        font.pixelSize: Math.round(11 * Theme.fontScale)
+                    }
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 48
+                visible: page.work.length === 0 && page.ledger !== null && !page.ledger.looking
+                text: qsTr("No branch is at work on the ledger's feature files.")
+                color: page.muted
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
+                font.pixelSize: Math.round(13 * Theme.fontScale)
             }
         }
 
@@ -354,7 +638,7 @@ Item {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: page.byline(row.modelData) + " · " + page.progress(row.modelData.scenarios)
+                                text: [page.byline(row.modelData), page.progress(row.modelData.scenarios)].concat(row.modelData.exact ? [] : [qsTr("whole file")]).join(" · ")
                                 color: page.muted
                                 elide: Text.ElideRight
                                 font.pixelSize: Math.round(11 * Theme.fontScale)
@@ -444,11 +728,32 @@ Item {
                     }
 
                     Text {
-                        text: qsTr("Written by")
+                        objectName: "t3codeTrackerWholeFile"
+                        Layout.fillWidth: true
+                        visible: about.pullRequest !== null && !about.pullRequest.exact
+                        text: qsTr("A file's # Sources: names it, so all of that file's scenarios count. A # Upstream #<number> comment above the scenarios it covers counts only those.")
                         color: page.muted
-                        font.pixelSize: Math.round(11 * Theme.fontScale)
-                        font.weight: Font.Medium
-                        font.capitalization: Font.AllUppercase
+                        wrapMode: Text.Wrap
+                        font.pixelSize: Math.round(12 * Theme.fontScale)
+                    }
+
+                    Text {
+                        objectName: "t3codeTrackerEntryWork"
+                        readonly property var atWork: (about.pullRequest?.work ?? []).map(name => page.workByBranch[name]).filter(item => item)
+
+                        Layout.fillWidth: true
+                        visible: atWork.length > 0
+                        textFormat: Text.StyledText
+                        linkColor: Theme.link
+                        text: visible ? qsTr("At work: %1").arg(atWork.map(item => page.workLink(item)).join(", ")) : ""
+                        color: page.foreground
+                        wrapMode: Text.Wrap
+                        font.pixelSize: Math.round(12 * Theme.fontScale)
+                        onLinkActivated: link => Qt.openUrlExternally(link)
+                    }
+
+                    SectionTitle {
+                        text: qsTr("Written by")
                     }
 
                     Text {
@@ -480,12 +785,8 @@ Item {
                         font.pixelSize: Math.round(12 * Theme.fontScale)
                     }
 
-                    Text {
+                    SectionTitle {
                         text: qsTr("Cited by")
-                        color: page.muted
-                        font.pixelSize: Math.round(11 * Theme.fontScale)
-                        font.weight: Font.Medium
-                        font.capitalization: Font.AllUppercase
                     }
 
                     Repeater {
@@ -495,7 +796,6 @@ Item {
                             id: file
 
                             required property var modelData
-                            readonly property var thread: page.threads["implement:" + modelData.path]
 
                             objectName: "t3codeTrackerFile:" + modelData.path
                             Layout.fillWidth: true
@@ -514,31 +814,15 @@ Item {
                                     font.pixelSize: Math.round(12 * Theme.fontScale)
                                 }
 
-                                ShellButton {
-                                    objectName: "t3codeTrackerImplementThread"
-                                    visible: file.thread !== undefined
-                                    subtle: true
-                                    text: visible ? qsTr("Implementing: %1").arg(page.threadStatus(file.thread)) : ""
-                                    Accessible.description: qsTr("Opens the thread implementing %1").arg(file.modelData.path)
-                                    onClicked: page.openThread(file.thread)
-                                }
-
-                                // Only what is still to do: scenarios in the backlog.
-                                ShellButton {
-                                    objectName: "t3codeTrackerImplement"
-                                    visible: file.modelData.scenarios.working > 0
-                                    subtle: true
-                                    text: qsTr("Implement")
-                                    Accessible.description: qsTr("Starts the implementing agent on the backlog scenarios of %1").arg(file.modelData.path)
-                                    onClicked: page.start("implement", {
-                                        path: file.modelData.path
-                                    })
+                                FileActions {
+                                    path: file.modelData.path
                                 }
                             }
 
                             Text {
+                                objectName: "t3codeTrackerFileCounts"
                                 Layout.fillWidth: true
-                                text: [page.progress(file.modelData.scenarios), file.modelData.note].filter(part => part).join(" · ")
+                                text: [page.progress(file.modelData.scenarios), file.modelData.scope === "file" ? qsTr("whole file") : "", file.modelData.note].filter(part => part).join(" · ")
                                 color: page.muted
                                 wrapMode: Text.Wrap
                                 font.pixelSize: Math.round(11 * Theme.fontScale)
