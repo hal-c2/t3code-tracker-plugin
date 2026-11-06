@@ -12,7 +12,7 @@ defmodule HalC2Plugins.T3codeTracker.Ledger do
   how `mise run features:pick` counts work.
 
   A comment line starting `# Upstream #<number>` (a pull request) or `# Upstream
-  <sha>` (a commit) cites it for the `Feature`, `Rule`, scenario or `Examples` table
+  <sha>` (a commit, by its full 40-character hash) cites it for the `Feature`, `Rule`, scenario or `Examples` table
   after it, as its tags would apply. A URL in the file's leading `# Sources:`
   comment cites for every scenario of the file, an attribution marked `"file"`: it
   does not say which scenarios carry it. A reference cited both ways is scoped.
@@ -101,7 +101,7 @@ defmodule HalC2Plugins.T3codeTracker.Ledger do
     |> Enum.reject(&upstream_line?/1)
   end
 
-  @upstream_line ~r/^#\s*Upstream\s+(?:#(\d+)|([0-9a-f]*\d[0-9a-f]*))\b[\s:.,;-]*(.*)$/i
+  @upstream_line ~r/^#\s*Upstream\s+(?:#(\d+)|([0-9a-f]{40}))\b[\s:.,;-]*(.*)$/i
 
   defp upstream_line?(line), do: Regex.match?(@upstream_line, line)
 

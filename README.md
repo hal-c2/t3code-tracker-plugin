@@ -41,7 +41,7 @@ the ledger's cursor (`features/UPSTREAM`) and are not read yet.
 A pull request or commit URL in a file's leading `# Sources:` comment cites it for
 the whole file, so every scenario in the file counts toward it. The page marks
 those **whole file**. To cite it for the scenarios it covers, put a comment line
-starting `# Upstream #<number>` (a pull request) or `# Upstream <sha>` (a commit)
+starting `# Upstream #<number>` (a pull request) or `# Upstream <sha>` (a commit, by its full 40-character hash)
 above them. It goes with the `Feature`, `Rule`, scenario or `Examples` table after
 it, as a tag line would, and the rest of the line says what upstream did:
 

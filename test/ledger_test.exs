@@ -97,6 +97,7 @@ defmodule HalC2Plugins.T3codeTracker.LedgerTest do
     Rule: Speed
 
       @backlog
+      # Upstream 2 tables differ here, which is prose and cites nothing.
       Scenario: Fast mode shows
         Then it shows
 
@@ -107,7 +108,7 @@ defmodule HalC2Plugins.T3codeTracker.LedgerTest do
           | speed | price |
           | slow  | 1     |
 
-        # Upstream 0a1b2c3d4e: a commit for one table.
+        # Upstream 0a1b2c3d4e5f60718293a4b5c6d7e8f901234567: a commit for one table.
         @backlog
         Examples:
           | speed | price |
@@ -122,7 +123,7 @@ defmodule HalC2Plugins.T3codeTracker.LedgerTest do
              {"pull", "3", "scoped", "the whole feature."},
              {"pull", "2", "scoped", "the header's note"},
              {"pull", "4", "scoped", "A rule."},
-             {"commit", "0a1b2c3d4e", "scoped", "a commit for one table."}
+             {"commit", "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567", "scoped", "a commit for one table."}
            ]
 
     # The outline passes while one of its tables does not: each table counts.
