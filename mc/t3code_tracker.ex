@@ -1,13 +1,15 @@
 defmodule HalC2Plugins.T3codeTracker do
   @moduledoc """
-  Tracks how far HAL-C2 has carried upstream T3 Code. Every few minutes it fetches
-  the ledger's main branch into its project on this MC, reads the feature files
-  there for the upstream pull requests and commits their `# Sources:` cite, and
-  fetches upstream's main
-  branch for who wrote each one. It publishes all of it on the `ledger` topic:
-  each cited pull request with the status of its scenarios and its authors, the
-  people credited across them, and how many upstream commits the ledger has not
-  read yet (after `features/UPSTREAM`).
+  Tracks the ledger's backlog and how far HAL-C2 has carried upstream T3 Code.
+  Every few minutes it fetches the ledger's branches into its project on this MC,
+  reads the feature files on main for their backlog and the upstream pull requests
+  and commits they cite, reads what the branches being worked on change in them,
+  and fetches upstream's main branch for who wrote each pull request. It publishes
+  all of it on the `ledger` topic: each feature file with backlog work, the
+  branches at work on the ledger with their pull requests, each cited upstream pull
+  request with the status of its scenarios and its authors, the people credited
+  across them, and how many upstream commits the ledger has not read yet (after
+  `features/UPSTREAM`).
 
   It also starts the agents that move the ledger on, each in a new worktree of the
   ledger's project: one that checks upstream (the upstream-ledger skill takes the
@@ -27,6 +29,10 @@ defmodule HalC2Plugins.T3codeTracker do
   @id "t3code-tracker"
   @roles ~w(checking implementing)
   @runtime_modes ~w(approval-required auto-accept-edits auto full-access)
+  # A branch is at work while it has an open pull request, or had a commit this
+  # recently; at most this many are read each look, the newest first.
+  @recent :timer.hours(24 * 7)
+  @most_branches 40
 
   # --- extension ------------------------------------------------------------------------
 
@@ -99,22 +105,17 @@ defmodule HalC2Plugins.T3codeTracker do
 
     cited =
       for entry <- snapshot["pullRequests"],
-          file <- entry["files"],
-          file["path"] == path,
-          do: {entry, file}
+          Enum.any?(entry["files"], &(&1["path"] == path)),
+          do: entry["url"]
 
-    case cited do
-      [] ->
-        {:error, "No upstream pull request is cited by #{path}."}
-
-      [{_, file} | _] ->
+    case Enum.find(snapshot["backlog"], &(&1["path"] == path)) do
+      %{"scenarios" => %{"working" => working} = scenarios} when working > 0 ->
         fill(context.settings["implementPrompt"], %{
           "file" => path,
-          "working" => to_string(file["scenarios"]["working"]),
-          "blocked" => to_string(file["scenarios"]["blocked"]),
+          "working" => to_string(working),
+          "blocked" => to_string(scenarios["blocked"]),
           "upstream" => context.settings["upstream"],
-          "pullRequests" =>
-            cited |> Enum.map(fn {entry, _} -> entry["url"] end) |> Enum.join(", ")
+          "pullRequests" => if(cited == [], do: "none", else: Enum.join(cited, ", "))
         })
         |> then(
           &start(
@@ -125,6 +126,9 @@ defmodule HalC2Plugins.T3codeTracker do
             &1
           )
         )
+
+      _ ->
+        {:error, "#{path} has no backlog scenarios that are not blocked."}
     end
   end
 
@@ -251,6 +255,8 @@ defmodule HalC2Plugins.T3codeTracker do
          "branch" => Mirror.branch(),
          "ledger" => nil,
          "cursor" => nil,
+         "backlog" => [],
+         "work" => [],
          "pullRequests" => [],
          "credits" => [],
          "checkedAt" => nil,
@@ -358,7 +364,9 @@ defmodule HalC2Plugins.T3codeTracker do
           error -> {[], error}
         end
 
-      entries = files |> features(upstream) |> Ledger.entries(commits, upstream)
+      features = features(files, upstream)
+      {work, listed} = work(project, upstream)
+      entries = Ledger.entries(features, commits, upstream, work)
       cursor = cursor(files, commits, dir)
 
       %{
@@ -371,6 +379,8 @@ defmodule HalC2Plugins.T3codeTracker do
           "commit" => sha
         },
         "cursor" => cursor,
+        "backlog" => Ledger.backlog(features),
+        "work" => Ledger.public(work),
         "pullRequests" => entries,
         "credits" => Ledger.credits(entries),
         "checkedAt" => System.system_time(:millisecond),
@@ -379,7 +389,8 @@ defmodule HalC2Plugins.T3codeTracker do
             [
               {"The ledger could not be fetched", fetched},
               {"Upstream could not be fetched", synced},
-              {"Upstream could not be read", logged}
+              {"Upstream could not be read", logged},
+              {"Open pull requests could not be read", listed}
             ],
             fn
               {what, {:error, message}} -> "#{what}: #{message}"
@@ -405,6 +416,77 @@ defmodule HalC2Plugins.T3codeTracker do
         project ->
           {:ok, project}
       end
+    end
+  end
+
+  # The branches at work on the ledger, with the feature files each changes: those
+  # with an open pull request, which names it, and those with a recent commit.
+  defp work(project, upstream) do
+    {pulls, listed} = open_pull_requests(project)
+    now = System.system_time(:millisecond)
+
+    branches =
+      case Checkout.branches(project["root"]) do
+        {:ok, branches} -> branches
+        _ -> []
+      end
+
+    work =
+      branches
+      |> Enum.filter(&(Map.has_key?(pulls, &1["branch"]) or now - &1["at"] < @recent))
+      |> Enum.sort_by(& &1["at"], :desc)
+      |> Enum.take(@most_branches)
+      |> Enum.flat_map(fn branch ->
+        with {:ok, diff} <- Checkout.diff(project["root"], branch["branch"]),
+             [_ | _] = files <- Ledger.work_files(diff, upstream) do
+          [
+            %{
+              "branch" => branch["branch"],
+              "at" => branch["at"],
+              "pullRequest" => pulls[branch["branch"]],
+              "files" => Enum.sort_by(files, & &1["path"])
+            }
+          ]
+        else
+          _ -> []
+        end
+      end)
+
+    {work, listed}
+  end
+
+  # The open pull requests of the ledger's project by their branch, when the plugin
+  # may read them: one listing a look.
+  defp open_pull_requests(project) do
+    if Host.granted?(@id, "pullRequests:read") do
+      case Host.pull_requests(@id, "list", %{"projectId" => project["id"], "state" => "open"}) do
+        {:ok, %{"entries" => entries} = listing} ->
+          by_branch =
+            for entry <- entries,
+                is_binary(entry["headBranch"]),
+                into: %{},
+                do:
+                  {entry["headBranch"],
+                   %{
+                     "number" => entry["number"],
+                     "title" => entry["title"],
+                     "url" => entry["url"],
+                     "draft" => entry["isDraft"] == true
+                   }}
+
+          case listing["errors"] do
+            [error | _] -> {by_branch, {:error, error["message"]}}
+            _ -> {by_branch, :ok}
+          end
+
+        {:error, %{} = reason} ->
+          {%{}, {:error, reason["message"] || reason["detail"] || inspect(reason)}}
+
+        {:error, reason} ->
+          {%{}, {:error, if(is_binary(reason), do: reason, else: inspect(reason))}}
+      end
+    else
+      {%{}, :ok}
     end
   end
 
